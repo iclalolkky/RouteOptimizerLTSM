@@ -6,9 +6,10 @@ from sklearn.preprocessing import MinMaxScaler
 from math import radians, cos, sin, asin, sqrt
 from ortools.constraint_solver import routing_enums_pb2
 from ortools.constraint_solver import pywrapcp
+import folium
 
 
-# Kus Ucusu Mesafe Hesaplama (Haversine)
+# Kus cusu Mesafe Hesaplama (Haversine)
 def haversine(lat1, lon1, lat2, lon2):
     lon1, lat1, lon2, lat2 = map(radians, [lon1, lat1, lon2, lat2])
     dlon = lon2 - lon1
@@ -104,11 +105,52 @@ def create_route(konteynerler):
             index = solution.Value(routing.NextVar(index))
             toplam_mesafe += routing.GetArcCostForVehicle(previous_index, index, 0)
 
+        # Harita Gorsellestirme
+        print("\nHarita oluşturuluyor...")
+
+        baslangic_enlem = rota_sirasi[0]['enlem']
+        baslangic_boylam = rota_sirasi[0]['boylam']
+        harita = folium.Map(location=[baslangic_enlem, baslangic_boylam], zoom_start=15)
+
+        koordinatlar_listesi = []
+
         for i, nokta in enumerate(rota_sirasi):
             print(
                 f"{i + 1}. Durak: Konteyner {nokta['id']} (Tahmini Doluluk: %{nokta['tahmin_doluluk']}) -> Koordinat: {nokta['enlem']}, {nokta['boylam']}")
+            koordinatlar_listesi.append([nokta['enlem'], nokta['boylam']])
+
+            if i == 0:
+                renk = 'green'  # Baslangic yeşil
+                ikon = 'play'
+            elif i == len(rota_sirasi) - 1:
+                renk = 'red'  # Bitis kırmızı
+                ikon = 'stop'
+            else:
+                renk = 'blue'  # Ara duraklar mavi
+                ikon = 'trash'
+
+            # Haritaya pinleri (marker) ekle
+            folium.Marker(
+                location=[nokta['enlem'], nokta['boylam']],
+                popup=f"<b>{i + 1}. Durak</b><br>Konteyner: {nokta['id']}<br>Doluluk: %{nokta['tahmin_doluluk']}",
+                icon=folium.Icon(color=renk, icon=ikon)
+            ).add_to(harita)
+
+        folium.PolyLine(
+            locations=koordinatlar_listesi,
+            color='red',
+            weight=3,
+            opacity=0.8
+        ).add_to(harita)
 
         print(f"\nToplam Katedilecek Mesafe: {toplam_mesafe} metre")
+
+        harita_kayit_yolu = os.path.join(os.path.dirname(__file__), '..', 'optimize_rota_haritasi.html')
+        harita.save(harita_kayit_yolu)
+
+        print(f"\n Rota başarıyla oluşturuldu!")
+        print(f" Bu dosyayı tarayıcıda açarak örnek rota haritasına ulaşabilirsiniz:\n {harita_kayit_yolu}")
+
     else:
         print("Uygun bir rota bulunamadı!")
 
