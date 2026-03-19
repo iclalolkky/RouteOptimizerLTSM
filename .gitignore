@@ -1,0 +1,7 @@
+# Environments
+.venv/
+env/
+
+# PyCharm/IDE ayarlari
+.idea/
+__pycache__/
