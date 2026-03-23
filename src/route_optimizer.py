@@ -1,4 +1,8 @@
 import os
+import logging
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+logging.getLogger('tensorflow').setLevel(logging.ERROR)
 import pandas as pd
 import numpy as np
 import tensorflow as tf
