@@ -5,21 +5,19 @@ import tensorflow as tf
 from sklearn.preprocessing import MinMaxScaler
 from ortools.constraint_solver import routing_enums_pb2
 from ortools.constraint_solver import pywrapcp
-import folium
 import requests
+import math
 
 
 def get_osrm_distance_matrix(konteynerler):
-    print("\nOSRM üzerinden yol mesafeleri hesaplanıyor...")
     coords = ";".join([f"{k['boylam']},{k['enlem']}" for k in konteynerler])
     url = f"http://router.project-osrm.org/table/v1/driving/{coords}?annotations=distance"
 
     try:
-        response = requests.get(url, timeout=10)
+        response = requests.get(url, timeout=15)
         if response.status_code == 200:
             data = response.json()
             matrix = np.array(data['distances'], dtype=int)
-            print("Yol verisi başarıyla çekildi!")
             return matrix
         else:
             print(f"OSRM API Hatası (Kod: {response.status_code}).")
@@ -30,7 +28,7 @@ def get_osrm_distance_matrix(konteynerler):
 
 
 def get_predictions_and_filter(veri_yolu, model_yolu, threshold=28):
-    print("Veriler ve Model yükleniyor...")
+    print("Sistem Başlatılıyor: Veriler ve Model yükleniyor...")
     df = pd.read_excel(veri_yolu)
     model = tf.keras.models.load_model(model_yolu)
 
@@ -61,26 +59,47 @@ def get_predictions_and_filter(veri_yolu, model_yolu, threshold=28):
                 'tahmin_doluluk': round(tahmin_gercek, 2)
             })
 
-    print(f"\nTahmin tamamlandı! %{threshold} üzeri doluluğa ulaşacak {len(hedef_konteynerler)} konteyner bulundu.")
+    print(
+        f"Tahmin tamamlandı! %{threshold} üzeri doluluğa ulaşacak toplam {len(hedef_konteynerler)} konteyner bulundu.")
     return hedef_konteynerler
 
 
-def create_route(konteynerler):
-    if len(konteynerler) < 2:
-        print("Rota oluşturmak için yeterli sayıda dolu konteyner yok.")
+def vardiyalara_bol(konteynerler):
+    depo = konteynerler[0]
+    kalanlar = konteynerler[1:]
+
+    kalanlar_sirali = sorted(kalanlar, key=lambda x: x['enlem'])
+    orta_nokta = len(kalanlar_sirali) // 2
+
+    sabah_vardiyasi = [depo] + kalanlar_sirali[:orta_nokta]
+    aksam_vardiyasi = [depo] + kalanlar_sirali[orta_nokta:]
+
+    return sabah_vardiyasi, aksam_vardiyasi
+
+
+def create_route(konteynerler, vardiya_adi):
+    if len(konteynerler) < 5:
+        print(f"\n[!] {vardiya_adi} için yeterli sayıda dolu konteyner yok.")
         return
 
-    print("\nOR-Tools ile Rota Optimizasyonu Başlıyor...")
+    print(f"\n{'=' * 60}")
+    print(f"          {vardiya_adi.upper()} ROTA RAPORU (5 KAMYON)")
+    print(f"{'=' * 60}")
+    print("OSRM üzerinden karayolu mesafeleri hesaplanıyor...")
+
     num_locations = len(konteynerler)
+    num_vehicles = 5
+    depot = 0
 
     distance_matrix = get_osrm_distance_matrix(konteynerler)
 
     if distance_matrix is None:
-        print(
-            "HATA: Yol verisi alınamadığı için rota optimizasyonu iptal edildi. Lütfen internet bağlantınızı kontrol edin veya daha sonra tekrar deneyin.")
+        print("HATA: Karayolu verisi alınamadı. Rota iptal edildi.")
         return
 
-    manager = pywrapcp.RoutingIndexManager(num_locations, 1, 0)
+    print("Yol verisi başarıyla çekildi. Rota Optimizasyonu başlatılıyor...")
+
+    manager = pywrapcp.RoutingIndexManager(num_locations, num_vehicles, depot)
     routing = pywrapcp.RoutingModel(manager)
 
     def distance_callback(from_index, to_index):
@@ -91,56 +110,60 @@ def create_route(konteynerler):
     transit_callback_index = routing.RegisterTransitCallback(distance_callback)
     routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
 
+    max_kapasite = math.ceil((num_locations - 1) / num_vehicles) + 2
+    demands = [0] + [1] * (num_locations - 1)
+
+    def demand_callback(from_index):
+        from_node = manager.IndexToNode(from_index)
+        return demands[from_node]
+
+    demand_callback_index = routing.RegisterUnaryTransitCallback(demand_callback)
+    routing.AddDimension(
+        demand_callback_index,
+        0,
+        max_kapasite,
+        True,
+        'Capacity'
+    )
+
     search_parameters = pywrapcp.DefaultRoutingSearchParameters()
     search_parameters.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
+    search_parameters.local_search_metaheuristic = routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
+    search_parameters.time_limit.seconds = 3
 
     solution = routing.SolveWithParameters(search_parameters)
 
     if solution:
-        print("\n--- ÇÖP TOPLAMA ROTASI ---")
-        index = routing.Start(0)
-        rota_sirasi = []
-        toplam_mesafe = 0
+        toplam_filo_mesafesi = 0
 
-        while not routing.IsEnd(index):
-            node_index = manager.IndexToNode(index)
-            rota_sirasi.append(konteynerler[node_index])
-            previous_index = index
-            index = solution.Value(routing.NextVar(index))
-            toplam_mesafe += routing.GetArcCostForVehicle(previous_index, index, 0)
+        for vehicle_id in range(num_vehicles):
+            index = routing.Start(vehicle_id)
+            rota_guzergahi = []
+            arac_mesafesi = 0
 
-        print("\nHarita oluşturuluyor...")
-        baslangic_enlem = rota_sirasi[0]['enlem']
-        baslangic_boylam = rota_sirasi[0]['boylam']
-        harita = folium.Map(location=[baslangic_enlem, baslangic_boylam], zoom_start=15)
+            while not routing.IsEnd(index):
+                node_index = manager.IndexToNode(index)
 
-        koordinatlar_listesi = []
-        for i, nokta in enumerate(rota_sirasi):
-            print(f"{i + 1}. Durak: Konteyner {nokta['id']} (Doluluk: %{nokta['tahmin_doluluk']})")
-            koordinatlar_listesi.append([nokta['enlem'], nokta['boylam']])
+                if node_index == 0:
+                    rota_guzergahi.append("DEPO")
+                else:
+                    rota_guzergahi.append(konteynerler[node_index]['id'])
 
-            if i == 0:
-                renk, ikon = 'green', 'play'
-            elif i == len(rota_sirasi) - 1:
-                renk, ikon = 'red', 'stop'
-            else:
-                renk, ikon = 'blue', 'trash'
+                previous_index = index
+                index = solution.Value(routing.NextVar(index))
+                arac_mesafesi += routing.GetArcCostForVehicle(previous_index, index, vehicle_id)
 
-            folium.Marker(
-                location=[nokta['enlem'], nokta['boylam']],
-                popup=f"<b>{i + 1}. Durak</b><br>Konteyner: {nokta['id']}<br>Doluluk: %{nokta['tahmin_doluluk']}",
-                icon=folium.Icon(color=renk, icon=ikon)
-            ).add_to(harita)
+            rota_guzergahi.append("DEPO")
+            toplam_filo_mesafesi += arac_mesafesi
 
-        folium.PolyLine(locations=koordinatlar_listesi, color='red', weight=4, opacity=0.8).add_to(harita)
+            # Sadece çalışan araçları yazdır
+            if len(rota_guzergahi) > 2:
+                print(f"\n🟢 Kamyon {vehicle_id + 1} Detayları:")
+                print(f"   Toplanan Konteyner : {len(rota_guzergahi) - 2} adet")
+                print(f"   Katedilen Mesafe   : {arac_mesafesi} metre")
+                print(f"   Güzergah           : {' -> '.join(rota_guzergahi)}")
 
-        print(f"\nToplam Katedilecek Yol Mesafesi: {toplam_mesafe} metre")
-
-        harita_kayit_yolu = os.path.join(os.path.dirname(__file__), '..', 'optimize_rota_haritasi.html')
-        harita.save(harita_kayit_yolu)
-
-        mutlak_yol = os.path.abspath(harita_kayit_yolu).replace(os.sep, '/')
-        print(f" Oluşturulan rotayı haritada inceleyebilmek için bu linke tıklayın:\n   file:///{mutlak_yol}")
+        print(f"\n🏁 {vardiya_adi} Toplam Filo Mesafesi: {toplam_filo_mesafesi} metre")
 
     else:
         print("Uygun bir rota bulunamadı!")
@@ -151,4 +174,8 @@ if __name__ == "__main__":
     model_yolu = os.path.join(os.path.dirname(__file__), '..', 'models', 'lstm_doluluk_modeli.keras')
 
     filtreli_konteynerler = get_predictions_and_filter(veri_yolu, model_yolu, threshold=28)
-    create_route(filtreli_konteynerler)
+
+    sabah_listesi, aksam_listesi = vardiyalara_bol(filtreli_konteynerler)
+
+    create_route(sabah_listesi, "Sabah Vardiyası")
+    create_route(aksam_listesi, "Akşam Vardiyası")
