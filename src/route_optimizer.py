@@ -1,8 +1,10 @@
 import os
 import logging
+
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 logging.getLogger('tensorflow').setLevel(logging.ERROR)
+
 import pandas as pd
 import numpy as np
 import tensorflow as tf
@@ -87,7 +89,7 @@ def create_route(konteynerler, vardiya_adi):
         return
 
     print(f"\n{'=' * 60}")
-    print(f"          {vardiya_adi.upper()} ROTA RAPORU (5 KAMYON)")
+    print(f" {vardiya_adi.upper()} ROTA RAPORU (5 KAMYON)")
     print(f"{'=' * 60}")
     print("OSRM üzerinden karayolu mesafeleri hesaplanıyor...")
 
@@ -101,7 +103,7 @@ def create_route(konteynerler, vardiya_adi):
         print("HATA: Karayolu verisi alınamadı. Rota iptal edildi.")
         return
 
-    print("Yol verisi başarıyla çekildi. Rota Optimizasyonu başlatılıyor...")
+    print("Yol verisi başarıyla çekildi. Rota Optimizasyonu başlatılıyor (10 sn sürebilir)...")
 
     manager = pywrapcp.RoutingIndexManager(num_locations, num_vehicles, depot)
     routing = pywrapcp.RoutingModel(manager)
@@ -114,7 +116,18 @@ def create_route(konteynerler, vardiya_adi):
     transit_callback_index = routing.RegisterTransitCallback(distance_callback)
     routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
 
-    max_kapasite = math.ceil((num_locations - 1) / num_vehicles) + 2
+    dimension_name = 'Distance'
+    routing.AddDimension(
+        transit_callback_index,
+        0,
+        50000,
+        True,
+        dimension_name
+    )
+    distance_dimension = routing.GetDimensionOrDie(dimension_name)
+    distance_dimension.SetGlobalSpanCostCoefficient(1000)
+
+    max_kapasite = math.ceil((num_locations - 1) / num_vehicles) + 1
     demands = [0] + [1] * (num_locations - 1)
 
     def demand_callback(from_index):
@@ -133,7 +146,8 @@ def create_route(konteynerler, vardiya_adi):
     search_parameters = pywrapcp.DefaultRoutingSearchParameters()
     search_parameters.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
     search_parameters.local_search_metaheuristic = routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
-    search_parameters.time_limit.seconds = 3
+
+    search_parameters.time_limit.seconds = 10
 
     solution = routing.SolveWithParameters(search_parameters)
 
@@ -147,7 +161,6 @@ def create_route(konteynerler, vardiya_adi):
 
             while not routing.IsEnd(index):
                 node_index = manager.IndexToNode(index)
-
                 if node_index == 0:
                     rota_guzergahi.append("DEPO")
                 else:
@@ -160,7 +173,6 @@ def create_route(konteynerler, vardiya_adi):
             rota_guzergahi.append("DEPO")
             toplam_filo_mesafesi += arac_mesafesi
 
-            # Sadece çalışan araçları yazdır
             if len(rota_guzergahi) > 2:
                 print(f"\n🟢 Kamyon {vehicle_id + 1} Detayları:")
                 print(f"   Toplanan Konteyner : {len(rota_guzergahi) - 2} adet")
@@ -170,7 +182,7 @@ def create_route(konteynerler, vardiya_adi):
         print(f"\n🏁 {vardiya_adi} Toplam Filo Mesafesi: {toplam_filo_mesafesi} metre")
 
     else:
-        print("Uygun bir rota bulunamadı!")
+        print("Uygun bir rota bulunamadı! (Matematiksel olarak çözülemedi)")
 
 
 if __name__ == "__main__":
@@ -178,7 +190,6 @@ if __name__ == "__main__":
     model_yolu = os.path.join(os.path.dirname(__file__), '..', 'models', 'lstm_doluluk_modeli.keras')
 
     filtreli_konteynerler = get_predictions_and_filter(veri_yolu, model_yolu, threshold=28)
-
     sabah_listesi, aksam_listesi = vardiyalara_bol(filtreli_konteynerler)
 
     create_route(sabah_listesi, "Sabah Vardiyası")
