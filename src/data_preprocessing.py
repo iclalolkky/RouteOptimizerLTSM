@@ -12,9 +12,9 @@ def load_and_clean_data(file_path):
     # Tarih ve saat sutunlarını birlestirip tek bir datetime yap
     df['tarih_saat'] = pd.to_datetime(df['tarih'] + ' ' + df['saat'])
 
-    # Gereksiz sutunları at
+    # Gereksiz sutunları at (errors='ignore': sutun yoksa hata vermez)
     columns_to_drop = ['tarih', 'saat', 'gun', 'doluluk_orani', 'harita_linki']
-    df = df.drop(columns=columns_to_drop)
+    df = df.drop(columns=columns_to_drop, errors='ignore')
 
     # Veriyi once konteyner_id'ye, sonra zamana göre sirala
     df = df.sort_values(by=['konteyner_id', 'tarih_saat']).reset_index(drop=True)
