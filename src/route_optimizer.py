@@ -218,10 +218,6 @@ def build_target_sizes(stop_count, num_vehicles):
     return [temel + (1 if vehicle_id < ekstra else 0) for vehicle_id in range(num_vehicles)]
 
 
-<<<<<<< Updated upstream
-def cluster_load(cluster, distance_matrix):
-    return float(sum(distance_matrix[0][node] for node in cluster))
-=======
 def route_distance_gap(route_distances):
     if not route_distances:
         return 0.0
@@ -231,12 +227,13 @@ def route_distance_gap(route_distances):
     ortalama = float(sum(aktif)) / len(aktif)
     if ortalama == 0:
         return 0.0
-
+    # Mutlak sapma + oransal sapma karışımı
     max_mutlak = max(abs(d - ortalama) for d in aktif)
     max_oransal = max(abs(d - ortalama) / ortalama for d in aktif)
-    return max_oransal + (max_mutlak / 50000)
+    return max_oransal + (max_mutlak / 50000)   # 50km normalizasyon
 
 def detect_outliers(distance_matrix, stop_indices):
+    """Depoya medyan mesafenin 2 katından uzak noktaları outlier say."""
     depot_distances = [distance_matrix[0][idx] for idx in stop_indices]
     if not depot_distances:
         return set()
@@ -251,11 +248,13 @@ def split_into_equal_count_clusters(distance_matrix, num_vehicles=NUM_VEHICLES):
     if not stop_indices:
         return clusters
 
+    # Outlier'ları ayır, normal noktalara hedef boyut uygula
     outlier_indices = detect_outliers(distance_matrix, stop_indices)
     normal_indices = [idx for idx in stop_indices if idx not in outlier_indices]
 
     target_sizes = build_target_sizes(len(normal_indices), num_vehicles)
 
+    # Seed: depoya orta mesafedeki normal noktalar (en uzak değil)
     sorted_normals = sorted(normal_indices, key=lambda idx: distance_matrix[0][idx])
     n = len(sorted_normals)
     step = max(1, n // num_vehicles)
@@ -267,6 +266,7 @@ def split_into_equal_count_clusters(distance_matrix, num_vehicles=NUM_VEHICLES):
 
     seeded = {c[0] for c in clusters if c}
 
+    # Normal noktaları eşit sayıda dağıt
     for node_index in [idx for idx in sorted_normals if idx not in seeded]:
         uygun_araclar = [
             v for v in range(num_vehicles)
@@ -284,6 +284,7 @@ def split_into_equal_count_clusters(distance_matrix, num_vehicles=NUM_VEHICLES):
         )
         clusters[best_vehicle].append(node_index)
 
+    # Outlier'ları en az mesafe artışı yapan kümeye ekle (sayı dengesini bozmaz)
     for outlier_idx in sorted(outlier_indices, key=lambda idx: distance_matrix[0][idx]):
         best_vehicle = min(
             range(num_vehicles),
@@ -304,6 +305,7 @@ def split_into_distance_balanced_clusters(distance_matrix, num_vehicles=NUM_VEHI
     if not stop_indices:
         return clusters
 
+    # Bu fonksiyon da outlier'ları ayırarak seed seçsin
     outlier_indices = detect_outliers(distance_matrix, stop_indices)
     normal_indices = [idx for idx in stop_indices if idx not in outlier_indices]
 
@@ -324,6 +326,7 @@ def split_into_distance_balanced_clusters(distance_matrix, num_vehicles=NUM_VEHI
         )
         clusters[best_vehicle].append(node_index)
 
+    # Outlier'ları ekle
     for outlier_idx in sorted(outlier_indices, key=lambda idx: distance_matrix[0][idx]):
         best_vehicle = min(
             range(num_vehicles),
@@ -334,75 +337,19 @@ def split_into_distance_balanced_clusters(distance_matrix, num_vehicles=NUM_VEHI
         clusters[best_vehicle].append(outlier_idx)
 
     return refine_clusters_by_route_balance(distance_matrix, clusters)
->>>>>>> Stashed changes
 
 
 def split_into_balanced_clusters(distance_matrix, num_vehicles=NUM_VEHICLES):
-    stop_indices = list(range(1, len(distance_matrix)))
-    target_sizes = build_target_sizes(len(stop_indices), num_vehicles)
-    clusters = [[] for _ in range(num_vehicles)]
+    baseline_clusters = split_into_equal_count_clusters(distance_matrix, num_vehicles=num_vehicles)
+    dynamic_clusters = split_into_distance_balanced_clusters(distance_matrix, num_vehicles=num_vehicles)
 
-    if not stop_indices:
-        return clusters
+    baseline_distances = [cluster_route_distance(distance_matrix, cluster) for cluster in baseline_clusters]
+    dynamic_distances = [cluster_route_distance(distance_matrix, cluster) for cluster in dynamic_clusters]
 
-    sorted_stops = sorted(stop_indices, key=lambda idx: distance_matrix[0][idx], reverse=True)
+    if route_distance_gap(dynamic_distances) <= route_distance_gap(baseline_distances):
+        return dynamic_clusters
 
-    for vehicle_id in range(min(num_vehicles, len(sorted_stops))):
-        if target_sizes[vehicle_id] == 0:
-            continue
-        seed_node = sorted_stops[vehicle_id]
-        clusters[vehicle_id].append(seed_node)
-
-    for node_index in sorted_stops[min(num_vehicles, len(sorted_stops)):]:
-        uygun_araclar = [
-            vehicle_id for vehicle_id in range(num_vehicles)
-            if len(clusters[vehicle_id]) < target_sizes[vehicle_id]
-        ]
-
-        best_vehicle = min(
-            uygun_araclar,
-            key=lambda vehicle_id: (
-                cluster_load(clusters[vehicle_id], distance_matrix) + float(distance_matrix[0][node_index]),
-                len(clusters[vehicle_id])
-            )
-        )
-        clusters[best_vehicle].append(node_index)
-
-    improved = True
-    while improved:
-        improved = False
-        loads = [cluster_load(cluster, distance_matrix) for cluster in clusters]
-        high_idx = int(np.argmax(loads))
-        low_idx = int(np.argmin(loads))
-        current_gap = loads[high_idx] - loads[low_idx]
-
-        if current_gap <= 0:
-            break
-
-        for high_node in list(clusters[high_idx]):
-            if len(clusters[low_idx]) < target_sizes[low_idx]:
-                new_high = loads[high_idx] - float(distance_matrix[0][high_node])
-                new_low = loads[low_idx] + float(distance_matrix[0][high_node])
-                if abs(new_high - new_low) < current_gap:
-                    clusters[high_idx].remove(high_node)
-                    clusters[low_idx].append(high_node)
-                    improved = True
-                    break
-
-            for low_node in list(clusters[low_idx]):
-                new_high = loads[high_idx] - float(distance_matrix[0][high_node]) + float(distance_matrix[0][low_node])
-                new_low = loads[low_idx] - float(distance_matrix[0][low_node]) + float(distance_matrix[0][high_node])
-                if abs(new_high - new_low) < current_gap:
-                    high_pos = clusters[high_idx].index(high_node)
-                    low_pos = clusters[low_idx].index(low_node)
-                    clusters[high_idx][high_pos] = low_node
-                    clusters[low_idx][low_pos] = high_node
-                    improved = True
-                    break
-            if improved:
-                break
-
-    return clusters
+    return baseline_clusters
 
 
 def solve_single_vehicle_route(distance_matrix, node_indices):
@@ -432,8 +379,9 @@ def cluster_route_distance(distance_matrix, cluster):
     return route_distance
 
 
-def refine_clusters_by_route_balance(distance_matrix, clusters, max_iterations=80):
+def refine_clusters_by_route_balance(distance_matrix, clusters, max_iterations=150):
     clusters = [list(cluster) for cluster in clusters]
+    total_nodes = sum(len(cluster) for cluster in clusters)
 
     for _ in range(max_iterations):
         route_distances = [cluster_route_distance(distance_matrix, cluster) for cluster in clusters]
@@ -444,11 +392,33 @@ def refine_clusters_by_route_balance(distance_matrix, clusters, max_iterations=8
         if current_gap <= 0:
             break
 
-        best_swap = None
+        best_move = None
         best_gap = current_gap
-
         high_cluster = clusters[high_idx]
         low_cluster = clusters[low_idx]
+
+        for high_node in list(high_cluster):
+            if len(high_cluster) <= 1 and total_nodes >= len(clusters):
+                continue
+
+            new_high_distance = cluster_route_distance(
+                distance_matrix,
+                [node for node in high_cluster if node != high_node]
+            )
+            new_low_distance = cluster_route_distance(distance_matrix, low_cluster + [high_node])
+            new_gap = abs(new_high_distance - new_low_distance)
+
+            if new_gap < best_gap:
+                best_gap = new_gap
+                best_move = ('move', high_node)
+
+        if best_move:
+            high_node = best_move[1]
+            clusters[high_idx].remove(high_node)
+            clusters[low_idx].append(high_node)
+            continue
+
+        best_swap = None
 
         for high_node in high_cluster:
             for low_node in low_cluster:
@@ -481,7 +451,6 @@ def optimize_balanced_routes(konteynerler, num_vehicles=NUM_VEHICLES):
         return None, None
 
     clusters = split_into_balanced_clusters(distance_matrix, num_vehicles=num_vehicles)
-    clusters = refine_clusters_by_route_balance(distance_matrix, clusters)
     truck_routes = []
 
     for vehicle_id, cluster in enumerate(clusters, start=1):

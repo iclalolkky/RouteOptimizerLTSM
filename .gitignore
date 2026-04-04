@@ -5,3 +5,4 @@ env/
 # PyCharm/IDE ayarlari
 .idea/
 __pycache__/
+.DS_Store
