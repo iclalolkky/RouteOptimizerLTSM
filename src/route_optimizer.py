@@ -127,7 +127,7 @@ def load_prediction_scaler(scaler_yolu, df):
     return scaler
 
 
-def get_predictions_and_filter(veri_yolu, model_yolu, scaler_yolu=None, threshold=28):
+def get_predictions_and_filter(veri_yolu, model_yolu, scaler_yolu=None, threshold=40):
     import tensorflow as tf
 
     print('Sistem Başlatılıyor: Veriler ve Model yükleniyor...')
@@ -489,7 +489,7 @@ if __name__ == '__main__':
         veri_yolu,
         model_yolu,
         scaler_yolu=scaler_yolu,
-        threshold=28
+        threshold=40
     )
     sabah_listesi, aksam_listesi = vardiyalara_bol(filtreli_konteynerler)
 
