@@ -8,7 +8,6 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 logging.getLogger('tensorflow').setLevel(logging.ERROR)
 
-import folium
 import numpy as np
 import pandas as pd
 import requests
@@ -17,7 +16,6 @@ NUM_VEHICLES = 5
 WINDOW_SIZE = 5
 DISTANCE_TOLERANCE_RATIO = 0.10
 OSRM_BASE_URL = 'https://router.project-osrm.org'
-ROUTE_COLORS = ['red', 'blue', 'green', 'purple', 'orange']
 EXPECTED_COLUMNS = [
     'konteyner_id', 'tarih', 'saat', 'gun', 'enlem', 'boylam',
     'doluluk_orani', 'doluluk_sayisal', 'harita_linki'
@@ -98,23 +96,6 @@ def get_osrm_distance_matrix(konteynerler):
     except Exception as error:
         print(f'Bağlantı hatası: {error}')
         return None
-
-
-def get_osrm_route_geometry(route_points):
-    if len(route_points) < 2:
-        return [[route_points[0]['enlem'], route_points[0]['boylam']]] if route_points else []
-
-    coords = ';'.join([f"{point['boylam']},{point['enlem']}" for point in route_points])
-    url = f"{OSRM_BASE_URL}/route/v1/driving/{coords}?overview=full&geometries=geojson"
-
-    try:
-        response = requests.get(url, timeout=20)
-        response.raise_for_status()
-        data = response.json()
-        geometry = data['routes'][0]['geometry']['coordinates']
-        return [[lat, lon] for lon, lat in geometry]
-    except Exception:
-        return [[point['enlem'], point['boylam']] for point in route_points]
 
 
 def load_prediction_scaler(scaler_yolu, df):
@@ -227,19 +208,19 @@ def route_distance_gap(route_distances):
     ortalama = float(sum(aktif)) / len(aktif)
     if ortalama == 0:
         return 0.0
-    # Mutlak sapma + oransal sapma karışımı
     max_mutlak = max(abs(d - ortalama) for d in aktif)
     max_oransal = max(abs(d - ortalama) / ortalama for d in aktif)
-    return max_oransal + (max_mutlak / 50000)   # 50km normalizasyon
+    return max_oransal + (max_mutlak / 50000)
+
 
 def detect_outliers(distance_matrix, stop_indices):
-    """Depoya medyan mesafenin 2 katından uzak noktaları outlier say."""
     depot_distances = [distance_matrix[0][idx] for idx in stop_indices]
     if not depot_distances:
         return set()
     median_dist = float(np.median(depot_distances))
     threshold = median_dist * 2.0
     return {idx for idx in stop_indices if distance_matrix[0][idx] > threshold}
+
 
 def split_into_equal_count_clusters(distance_matrix, num_vehicles=NUM_VEHICLES):
     stop_indices = list(range(1, len(distance_matrix)))
@@ -248,13 +229,11 @@ def split_into_equal_count_clusters(distance_matrix, num_vehicles=NUM_VEHICLES):
     if not stop_indices:
         return clusters
 
-    # Outlier'ları ayır, normal noktalara hedef boyut uygula
     outlier_indices = detect_outliers(distance_matrix, stop_indices)
     normal_indices = [idx for idx in stop_indices if idx not in outlier_indices]
 
     target_sizes = build_target_sizes(len(normal_indices), num_vehicles)
 
-    # Seed: depoya orta mesafedeki normal noktalar (en uzak değil)
     sorted_normals = sorted(normal_indices, key=lambda idx: distance_matrix[0][idx])
     n = len(sorted_normals)
     step = max(1, n // num_vehicles)
@@ -266,7 +245,6 @@ def split_into_equal_count_clusters(distance_matrix, num_vehicles=NUM_VEHICLES):
 
     seeded = {c[0] for c in clusters if c}
 
-    # Normal noktaları eşit sayıda dağıt
     for node_index in [idx for idx in sorted_normals if idx not in seeded]:
         uygun_araclar = [
             v for v in range(num_vehicles)
@@ -284,7 +262,6 @@ def split_into_equal_count_clusters(distance_matrix, num_vehicles=NUM_VEHICLES):
         )
         clusters[best_vehicle].append(node_index)
 
-    # Outlier'ları en az mesafe artışı yapan kümeye ekle (sayı dengesini bozmaz)
     for outlier_idx in sorted(outlier_indices, key=lambda idx: distance_matrix[0][idx]):
         best_vehicle = min(
             range(num_vehicles),
@@ -297,7 +274,6 @@ def split_into_equal_count_clusters(distance_matrix, num_vehicles=NUM_VEHICLES):
     return clusters
 
 
-
 def split_into_distance_balanced_clusters(distance_matrix, num_vehicles=NUM_VEHICLES):
     stop_indices = list(range(1, len(distance_matrix)))
     clusters = [[] for _ in range(num_vehicles)]
@@ -305,7 +281,6 @@ def split_into_distance_balanced_clusters(distance_matrix, num_vehicles=NUM_VEHI
     if not stop_indices:
         return clusters
 
-    # Bu fonksiyon da outlier'ları ayırarak seed seçsin
     outlier_indices = detect_outliers(distance_matrix, stop_indices)
     normal_indices = [idx for idx in stop_indices if idx not in outlier_indices]
 
@@ -326,7 +301,6 @@ def split_into_distance_balanced_clusters(distance_matrix, num_vehicles=NUM_VEHI
         )
         clusters[best_vehicle].append(node_index)
 
-    # Outlier'ları ekle
     for outlier_idx in sorted(outlier_indices, key=lambda idx: distance_matrix[0][idx]):
         best_vehicle = min(
             range(num_vehicles),
@@ -467,63 +441,6 @@ def optimize_balanced_routes(konteynerler, num_vehicles=NUM_VEHICLES):
     return truck_routes, distance_matrix
 
 
-def save_shift_map(vardiya_adi, truck_routes, cikti_adi=None):
-    if not truck_routes:
-        return None
-
-    merkez = truck_routes[0]['route_points'][0]
-    harita = folium.Map(location=[merkez['enlem'], merkez['boylam']], zoom_start=14, control_scale=True)
-
-    folium.Marker(
-        [merkez['enlem'], merkez['boylam']],
-        popup='DEPO',
-        tooltip='DEPO',
-        icon=folium.Icon(color='black', icon='home')
-    ).add_to(harita)
-
-    for route in truck_routes:
-        color = ROUTE_COLORS[(route['vehicle_id'] - 1) % len(ROUTE_COLORS)]
-        geometry = get_osrm_route_geometry(route['route_points'])
-
-        if geometry:
-            folium.PolyLine(
-                locations=geometry,
-                color=color,
-                weight=5,
-                opacity=0.85,
-                tooltip=f"Kamyon {route['vehicle_id']}"
-            ).add_to(harita)
-
-        for point in route['route_points'][1:-1]:
-            folium.CircleMarker(
-                location=[point['enlem'], point['boylam']],
-                radius=6,
-                color=color,
-                fill=True,
-                fill_opacity=0.9,
-                popup=(
-                    f"<b>Kamyon {route['vehicle_id']}</b><br>"
-                    f"Konteyner: {point['id']}<br>"
-                    f"Doluluk Tahmini: %{point.get('tahmin_doluluk', 0)}"
-                )
-            ).add_to(harita)
-
-    if cikti_adi is None:
-        cikti_adi = f"optimize_rota_haritasi_{slugify(vardiya_adi)}.html"
-
-    dosya_yolu = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', cikti_adi))
-    harita.save(dosya_yolu)
-    return dosya_yolu
-
-
-def save_combined_map(vardiya_sonuclari):
-    tum_rotalar = [route for routes in vardiya_sonuclari.values() for route in routes]
-    if not tum_rotalar:
-        return None
-
-    return save_shift_map('Genel Rota', tum_rotalar, cikti_adi='optimize_rota_haritasi.html')
-
-
 def create_route(konteynerler, vardiya_adi):
     print(f"\n{'=' * 60}")
     print(f" {vardiya_adi.upper()} ROTA RAPORU (5 KAMYON)")
@@ -551,15 +468,7 @@ def create_route(konteynerler, vardiya_adi):
         if route['pickup_count'] > 0:
             aktif_mesafeler.append(route['distance'])
 
-    if aktif_mesafeler:
-        ortalama_mesafe = sum(aktif_mesafeler) / len(aktif_mesafeler)
-        max_sapma = max(abs(mesafe - ortalama_mesafe) / ortalama_mesafe for mesafe in aktif_mesafeler)
-        print(f"\n Mesafe Denge Sapması: %{max_sapma * 100:.1f} (hedef: ≤ %{DISTANCE_TOLERANCE_RATIO * 100:.0f})")
-
     print(f"\n🏁 {vardiya_adi} Toplam Filo Mesafesi: {toplam_filo_mesafesi} metre")
-    harita_yolu = save_shift_map(vardiya_adi, truck_routes)
-    if harita_yolu:
-        print(f"🗺️ Harita kaydedildi: {harita_yolu}")
 
     return truck_routes
 
@@ -580,9 +489,4 @@ if __name__ == '__main__':
     sabah_sonuclari = create_route(sabah_listesi, 'Sabah Vardiyası')
     aksam_sonuclari = create_route(aksam_listesi, 'Akşam Vardiyası')
 
-    genel_harita = save_combined_map({
-        'Sabah Vardiyası': sabah_sonuclari,
-        'Akşam Vardiyası': aksam_sonuclari
-    })
-    if genel_harita:
-        print(f'Genel rota haritası kaydedildi: {genel_harita}')
+    print("\n Tüm vardiya rotaları hesaplandı.")
