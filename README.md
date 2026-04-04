@@ -59,6 +59,23 @@ Harita çizimi artık OSRM `route/v1` kullanarak sokak/yol ağına oturan çizgi
 - `optimize_rota_haritasi_sabah_vardiyasi.html`
 - `optimize_rota_haritasi_aksam_vardiyasi.html`
 
+### 🗺️ Harita Önizlemeleri
+
+#### Genel Rota Haritası
+[HTML dosyasını aç](./optimize_rota_haritasi.html)
+
+![Genel Rota Haritası](./docs/images/optimize_rota_haritasi.png)
+
+#### Sabah Vardiyası Haritası
+[HTML dosyasını aç](./optimize_rota_haritasi_sabah_vardiyasi.html)
+
+![Sabah Vardiyası Haritası](./docs/images/optimize_rota_haritasi_sabah_vardiyasi.png)
+
+#### Akşam Vardiyası Haritası
+[HTML dosyasını aç](./optimize_rota_haritasi_aksam_vardiyasi.html)
+
+![Akşam Vardiyası Haritası](./docs/images/optimize_rota_haritasi_aksam_vardiyasi.png)
+
 ### 5) macOS ortamı için çalışma kararlılığı sağlandı
 Uygulama sırasında **TensorFlow + OR-Tools** birlikte kullanıldığında yerel (`native`) çökme problemi gözlendi.
 Bu yüzden mevcut çalışır sürümde rota sıralaması için **NumPy tabanlı greedy + dengeleme iyileştirmesi** kullanıldı.
