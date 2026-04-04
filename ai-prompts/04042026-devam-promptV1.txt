@@ -1,0 +1,14 @@
+
+Görev: route_optimizer.py dosyasındaki araçlar arası mesafe eşitsizliğini (%37.8 ve %24.9 sapma oranlarını) düşürmek için dinamik konteyner dağıtımı mantığını uygulamak.
+
+Mevcut Durum Özeti:
+Bir önceki aşamada veri setini 1 haftalığa indirdin, 5 kamyon zorunluluğunu başarıyla kodladın ve gerçek yol (OSRM) geometrisiyle haritalandırmayı çözdün. Ancak araç başına eşit sayıda (örneğin 10'ar adet) konteyner atandığı için mesafeler arası sapmalar hedeflenen seviyede değil.
+
+Yeni İş Kuralları ve Beklentiler:
+1. Dinamik Yük Dağıtımı (Kritik İstek): Kamyonlar arasındaki mesafe eşitliğini sağlamak için artık her kamyona eşit sayıda konteyner vermek zorunda değilsin. **Uzağa gidecek olan kamyonlara daha az konteyner vererek** onların da yakın çevredeki araçlarla benzer mesafeler kat etmesini sağla.
+2. Mesafe Optimizasyonu: Algoritmayı, konteyner sayısını değil, "toplam kat edilen mesafeyi" kamyonlar arasında eşitleyecek şekilde yeniden yapılandır (Swap iyileştirmeleri ve kümeleme mantığını buna göre güncelle).
+3. 5 Kamyon Kuralının Korunması: Dinamik yük dağıtımı yaparken, her vardiyada 5 kamyonun da mutlaka rotaya çıkması kuralını bozma. Hiçbir kamyon tamamen boşa çıkarılmamalıdır.
+4. Fallback (Geri Dönüş) Stratejisi: Eğer uzağa giden kamyona daha az konteyner verme mantığı sistemi/kodu bozarsa, testleri geçemezse veya mesafe sapmasını mevcut durumdan (%37.8 - %24.9) daha kötü bir hale getirirse; **yapılan değişiklikleri iptal et ve kodun şu anki stabil (çalışan) halini koru.**
+
+Aksiyon:
+Lütfen `route_optimizer.py` içindeki kümeleme (clustering) ve yük dağıtım (route balancing) algoritmalarını bu yeni "mesafeye göre dinamik konteyner sayısı" kuralına göre refactor et ve testleri çalıştırarak sapma oranlarındaki iyileşmeyi raporla.
