@@ -218,8 +218,123 @@ def build_target_sizes(stop_count, num_vehicles):
     return [temel + (1 if vehicle_id < ekstra else 0) for vehicle_id in range(num_vehicles)]
 
 
+<<<<<<< Updated upstream
 def cluster_load(cluster, distance_matrix):
     return float(sum(distance_matrix[0][node] for node in cluster))
+=======
+def route_distance_gap(route_distances):
+    if not route_distances:
+        return 0.0
+    aktif = [d for d in route_distances if d > 0]
+    if not aktif:
+        return 0.0
+    ortalama = float(sum(aktif)) / len(aktif)
+    if ortalama == 0:
+        return 0.0
+
+    max_mutlak = max(abs(d - ortalama) for d in aktif)
+    max_oransal = max(abs(d - ortalama) / ortalama for d in aktif)
+    return max_oransal + (max_mutlak / 50000)
+
+def detect_outliers(distance_matrix, stop_indices):
+    depot_distances = [distance_matrix[0][idx] for idx in stop_indices]
+    if not depot_distances:
+        return set()
+    median_dist = float(np.median(depot_distances))
+    threshold = median_dist * 2.0
+    return {idx for idx in stop_indices if distance_matrix[0][idx] > threshold}
+
+def split_into_equal_count_clusters(distance_matrix, num_vehicles=NUM_VEHICLES):
+    stop_indices = list(range(1, len(distance_matrix)))
+    clusters = [[] for _ in range(num_vehicles)]
+
+    if not stop_indices:
+        return clusters
+
+    outlier_indices = detect_outliers(distance_matrix, stop_indices)
+    normal_indices = [idx for idx in stop_indices if idx not in outlier_indices]
+
+    target_sizes = build_target_sizes(len(normal_indices), num_vehicles)
+
+    sorted_normals = sorted(normal_indices, key=lambda idx: distance_matrix[0][idx])
+    n = len(sorted_normals)
+    step = max(1, n // num_vehicles)
+    seed_pool = [sorted_normals[min(i * step + step // 2, n - 1)] for i in range(num_vehicles)]
+
+    for vehicle_id in range(min(num_vehicles, len(seed_pool))):
+        if target_sizes[vehicle_id] > 0:
+            clusters[vehicle_id].append(seed_pool[vehicle_id])
+
+    seeded = {c[0] for c in clusters if c}
+
+    for node_index in [idx for idx in sorted_normals if idx not in seeded]:
+        uygun_araclar = [
+            v for v in range(num_vehicles)
+            if len(clusters[v]) < target_sizes[v]
+        ]
+        if not uygun_araclar:
+            uygun_araclar = list(range(num_vehicles))
+
+        best_vehicle = min(
+            uygun_araclar,
+            key=lambda v: (
+                cluster_route_distance(distance_matrix, clusters[v] + [node_index]),
+                len(clusters[v])
+            )
+        )
+        clusters[best_vehicle].append(node_index)
+
+    for outlier_idx in sorted(outlier_indices, key=lambda idx: distance_matrix[0][idx]):
+        best_vehicle = min(
+            range(num_vehicles),
+            key=lambda v: cluster_route_distance(
+                distance_matrix, clusters[v] + [outlier_idx]
+            )
+        )
+        clusters[best_vehicle].append(outlier_idx)
+
+    return clusters
+
+
+
+def split_into_distance_balanced_clusters(distance_matrix, num_vehicles=NUM_VEHICLES):
+    stop_indices = list(range(1, len(distance_matrix)))
+    clusters = [[] for _ in range(num_vehicles)]
+
+    if not stop_indices:
+        return clusters
+
+    outlier_indices = detect_outliers(distance_matrix, stop_indices)
+    normal_indices = [idx for idx in stop_indices if idx not in outlier_indices]
+
+    sorted_normals = sorted(normal_indices, key=lambda idx: distance_matrix[0][idx])
+    n = len(sorted_normals)
+    step = max(1, n // num_vehicles)
+    seed_pool = [sorted_normals[min(i * step + step // 2, n - 1)] for i in range(num_vehicles)]
+
+    for vehicle_id in range(min(num_vehicles, len(seed_pool))):
+        clusters[vehicle_id].append(seed_pool[vehicle_id])
+
+    seeded = {c[0] for c in clusters if c}
+
+    for node_index in [idx for idx in sorted_normals if idx not in seeded]:
+        best_vehicle = min(
+            range(num_vehicles),
+            key=lambda v: cluster_route_distance(distance_matrix, clusters[v] + [node_index])
+        )
+        clusters[best_vehicle].append(node_index)
+
+    for outlier_idx in sorted(outlier_indices, key=lambda idx: distance_matrix[0][idx]):
+        best_vehicle = min(
+            range(num_vehicles),
+            key=lambda v: cluster_route_distance(
+                distance_matrix, clusters[v] + [outlier_idx]
+            )
+        )
+        clusters[best_vehicle].append(outlier_idx)
+
+    return refine_clusters_by_route_balance(distance_matrix, clusters)
+>>>>>>> Stashed changes
 
 
 def split_into_balanced_clusters(distance_matrix, num_vehicles=NUM_VEHICLES):
@@ -470,7 +585,7 @@ def create_route(konteynerler, vardiya_adi):
     if aktif_mesafeler:
         ortalama_mesafe = sum(aktif_mesafeler) / len(aktif_mesafeler)
         max_sapma = max(abs(mesafe - ortalama_mesafe) / ortalama_mesafe for mesafe in aktif_mesafeler)
-        print(f"\n📊 Mesafe Denge Sapması: %{max_sapma * 100:.1f} (hedef: ≤ %{DISTANCE_TOLERANCE_RATIO * 100:.0f})")
+        print(f"\n Mesafe Denge Sapması: %{max_sapma * 100:.1f} (hedef: ≤ %{DISTANCE_TOLERANCE_RATIO * 100:.0f})")
 
     print(f"\n🏁 {vardiya_adi} Toplam Filo Mesafesi: {toplam_filo_mesafesi} metre")
     harita_yolu = save_shift_map(vardiya_adi, truck_routes)
@@ -501,4 +616,4 @@ if __name__ == '__main__':
         'Akşam Vardiyası': aksam_sonuclari
     })
     if genel_harita:
-        print(f'🗺️ Genel rota haritası kaydedildi: {genel_harita}')
+        print(f'Genel rota haritası kaydedildi: {genel_harita}')
